@@ -1797,11 +1797,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         # read-only connections so they never queue behind writer flushes on
         # self._lock. See _read_ctx().
         self._read_local = threading.local()
-        # Strong set of all live read connections across all threads.  We
-        # hold a reference so short-lived reader threads' connections are
-        # not GC'd without close() — that would leak tracked fds in
-        # _live_connections.  close() drains this set.
-        self._read_conns: "set[sqlite3.Connection]" = set()
+        # Map from thread ident to read-only connection for all live reader
+        # threads.  We hold a reference so short-lived reader threads'
+        # connections are not GC'd without close() — that would leak tracked
+        # fds in _live_connections.  close() drains this dict.  Dead-thread
+        # entries are pruned opportunistically in _get_read_conn() so that
+        # FD usage tracks current concurrency, not historical thread count.
+        self._read_conns: "dict[int, sqlite3.Connection]" = {}
         self._read_conns_lock = threading.Lock()
         # Set when close() begins.  _get_read_conn checks this under the
         # lock so a reader that finishes opening after the drain finds the
@@ -2048,7 +2050,22 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
                     conn.close()
                     self._read_local.failed = True
                     return None
-                self._read_conns.add(conn)
+                tid = threading.get_ident()
+                self._read_conns[tid] = conn
+                # Opportunistically prune connections from threads that
+                # have exited.  Without this, _read_conns grows with
+                # historical thread count and leaks file descriptors.
+                alive = {t.ident for t in threading.enumerate()}
+                stale = [
+                    k for k in self._read_conns if k != tid and k not in alive
+                ]
+                for k in stale:
+                    stale_conn = self._read_conns.pop(k, None)
+                    if stale_conn is not None:
+                        try:
+                            stale_conn.close()
+                        except Exception:
+                            pass
         except sqlite3.Error:
             # Mark this thread failed so we don't retry the open on every
             # query; the locked writer connection still serves reads.
@@ -2522,13 +2539,13 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
         # Close all read-only connections across all threads.  Per-thread
         # connections live in threading.local() and would otherwise be GC'd
         # without calling close(), leaking tracked fds in _live_connections.
-        # The strong set holds references so short-lived reader threads'
+        # The dict holds references so short-lived reader threads'
         # connections survive until close() drains them.  Setting the closed
         # flag under the lock prevents a reader from registering a new
         # connection after the drain.
         with self._read_conns_lock:
             self._read_conns_closed = True
-            read_conns = list(self._read_conns)
+            read_conns = list(self._read_conns.values())
             self._read_conns.clear()
         for conn in read_conns:
             try:
