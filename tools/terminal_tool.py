@@ -2451,7 +2451,13 @@ def terminal_tool(
                         env = new_env
                     logger.info("%s environment ready for task %s", env_type, effective_task_id[:8])
 
-        assert env is not None  # all creation failure paths return above
+        if env is None:
+            return json.dumps({
+                "output": "",
+                "exit_code": -1,
+                "error": "Terminal environment creation failed unexpectedly",
+                "status": "disabled",
+            }, ensure_ascii=False)
 
         # The session key that drives cwd records: get_current_session_key()'s
         # contextvar doesn't cross tool-worker threads, so fall back to the raw
