@@ -8930,7 +8930,14 @@ def _format_kanban_event_text(sub: dict, task, ev, board_slug: str) -> Optional[
         return f"⏸ {board_tag}{tag}Kanban {task_id} blocked{reason}"
     if kind == "gave_up":
         err = f"\n{str(payload.get('error'))[:200]}" if payload.get("error") else ""
-        return f"✖ {board_tag}{tag}Kanban {task_id} gave up after repeated spawn failures{err}"
+        trigger = payload.get("trigger_outcome", "spawn_failed")
+        cause = {
+            "spawn_failed": "repeated spawn failures",
+            "timed_out": "repeated timeouts",
+            "crashed": "repeated crashes",
+            "iteration_budget_exhausted": "iteration budget exhausted",
+        }.get(trigger, trigger)
+        return f"✖ {board_tag}{tag}Kanban {task_id} gave up after {cause}{err}"
     if kind == "crashed":
         return f"✖ {board_tag}{tag}Kanban {task_id} worker crashed (pid gone); dispatcher will retry"
     if kind == "timed_out":

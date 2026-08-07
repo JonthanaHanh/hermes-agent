@@ -441,9 +441,19 @@ class GatewayKanbanWatchersMixin:
                             err = ""
                             if ev.payload and ev.payload.get("error"):
                                 err = f"\n{str(ev.payload['error'])[:200]}"
+                            trigger = (
+                                ev.payload.get("trigger_outcome", "spawn_failed")
+                                if ev.payload else "spawn_failed"
+                            )
+                            cause = {
+                                "spawn_failed": "repeated spawn failures",
+                                "timed_out": "repeated timeouts",
+                                "crashed": "repeated crashes",
+                                "iteration_budget_exhausted": "iteration budget exhausted",
+                            }.get(trigger, trigger)
                             msg = (
                                 f"✖ {board_tag}{tag}Kanban {sub['task_id']} gave up "
-                                f"after repeated spawn failures{err}"
+                                f"after {cause}{err}"
                             )
                         elif kind == "crashed":
                             msg = (
