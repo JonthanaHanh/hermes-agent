@@ -276,6 +276,31 @@ class TestMaybeAutoTitle:
         assert db.get_session_title("sess-1") is None
         mock_auto.assert_not_called()
 
+    def test_skips_model_switch_marker_and_titles_real_message(self, tmp_path):
+        """A model-switch marker before the first real message must not consume
+        the session's only titling opportunity (#82206)."""
+        db = SessionDB(tmp_path / "state.db")
+        db.create_session(session_id="sess-1", source="cli")
+        marker = (
+            "[System: The active model for this chat has changed to "
+            "deepseek/deepseek-v3 via provider openrouter. From this point "
+            "forward, use this runtime metadata when answering questions "
+            "about what model/provider is active.]"
+        )
+        # History contains the marker as a user message (same as
+        # _append_model_switch_marker produces).
+        history = [
+            {"role": "user", "content": marker, "display_kind": "model_switch"},
+        ]
+        with patch("agent.title_generator.auto_title_session") as mock_auto:
+            import threading
+            called = threading.Event()
+            mock_auto.side_effect = lambda *a, **k: called.set()
+            maybe_auto_title(db, "sess-1", "What is the weather?", history)
+            assert called.wait(timeout=10), "auto_title thread never ran"
+        # Title should be derived from the real question, not the marker.
+        assert db.get_session_title("sess-1") == "What is the weather?"
+
 
 
 

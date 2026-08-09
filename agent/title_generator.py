@@ -116,6 +116,7 @@ _MACHINE_PREFIXES = (
     "[CONTEXT COMPACTION",
     "[Runtime note:",
     "[SYSTEM]",
+    "[System: The active model",
 )
 
 
@@ -622,7 +623,9 @@ def maybe_auto_title(
     user_msg_count = sum(
         1
         for m in (conversation_history or [])
-        if isinstance(m, dict) and m.get("role") == "user"
+        if isinstance(m, dict)
+        and m.get("role") == "user"
+        and m.get("display_kind") != "model_switch"
     )
     if user_msg_count > 1:
         return
